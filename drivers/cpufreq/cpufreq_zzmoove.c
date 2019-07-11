@@ -78,13 +78,13 @@
 #define ZZMOOVE_VERSION "develop"
 
 // ZZ: support for 2,4,6 or 8 cores (this will enable/disable hotplug threshold tuneables and limit hotplug max limit tuneable)
-#define MAX_CORES					(4)
+#define MAX_CORES					(8)
 
 // ZZ: enable/disable hotplug support
 // #define ENABLE_HOTPLUGGING
 
 // ZZ: enable support for native hotplugging on snapdragon platform
-// #define SNAP_NATIVE_HOTPLUGGING
+#define SNAP_NATIVE_HOTPLUGGING
 
 // ZZ: enable for sources with backported cpufreq implementation of 3.10 kernel
 // #define CPU_IDLE_TIME_IN_CPUFREQ
@@ -8682,7 +8682,7 @@ void zzmoove_suspend(void)
 
 #if defined(CONFIG_HAS_EARLYSUSPEND) && !defined(USE_LCD_NOTIFIER)
 static void __cpuinit powersave_late_resume(struct early_suspend *handler)
-#elif defined(CONFIG_POWERSUSPEND) && !defined(USE_LCD_NOTIFIER) || defined(CONFIG_POWERSUSPEND) && defined(USE_LCD_NOTIFIER)
+#elif defined(CONFIG_POWERSUSPEND) && !defined(USE_LCD_NOTIFIER)
 static void __cpuinit powersave_resume(struct power_suspend *handler)
 #elif defined(USE_LCD_NOTIFIER)
 void zzmoove_resume(void)
@@ -8791,7 +8791,7 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 	struct cpu_dbs_info_s *this_dbs_info;
 	unsigned int j;
 	int rc;
-#ifdef ENABLE_HOTPLUGGING
+#if defined(ENABLE_HOTPLUGGING) && !defined(SNAP_NATIVE_HOTPLUGGING)
 	int i = 0;
 #endif /* ENABLE_HOTPLUGGING */
 	this_dbs_info = &per_cpu(cs_cpu_dbs_info, cpu);
@@ -8837,14 +8837,14 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 		    freq_init_count = 0;					// ZZ: reset init flag for governor reload
 		    system_freq_table = cpufreq_frequency_get_table(0);		// ZZ: update static system frequency table
 		    evaluate_scaling_order_limit_range(1, 0, 0, policy->min, policy->max);	// ZZ: table order detection and limit optimizations
-#ifdef ENABLE_HOTPLUGGING
-			// ZZ: save default values in threshold array
-			for (i = 0; i < possible_cpus; i++) {
-			    hotplug_thresholds[0][i] = DEF_FREQUENCY_UP_THRESHOLD_HOTPLUG;
-			    hotplug_thresholds[1][i] = DEF_FREQUENCY_DOWN_THRESHOLD_HOTPLUG;
-			}
-#endif /* ENABLE_HOTPLUGGING */
 		}
+#if defined(ENABLE_HOTPLUGGING) && !defined(SNAP_NATIVE_HOTPLUGGING)
+		// ZZ: save default values in threshold array
+		for (i = 0; i < possible_cpus; i++) {
+		    hotplug_thresholds[0][i] = DEF_FREQUENCY_UP_THRESHOLD_HOTPLUG;
+		    hotplug_thresholds[1][i] = DEF_FREQUENCY_DOWN_THRESHOLD_HOTPLUG;
+		}
+#endif /* ENABLE_HOTPLUGGING */
 		mutex_init(&this_dbs_info->timer_mutex);
 		dbs_enable++;
 		/*
@@ -9116,10 +9116,7 @@ static int __init cpufreq_gov_dbs_init(void)						// ZZ: idle exit time handling
 #if (defined(USE_LCD_NOTIFIER) && !defined(CONFIG_POWERSUSPEND))
 	// AP: register callback handler for lcd notifier
 	zzmoove_lcd_notif.notifier_call = zzmoove_lcd_notifier_callback;
-	if (lcd_register_client(&zzmoove_lcd_notif) != 0) {
-		pr_err("%s: Failed to register lcd callback\n", __func__);
-		return -EFAULT;
-	}
+	
 #endif /* (defined(USE_LCD_NOTIFIER)... */
 	return cpufreq_register_governor(&cpufreq_gov_zzmoove);
 }
@@ -9132,9 +9129,7 @@ static void __exit cpufreq_gov_dbs_exit(void)
 	destroy_workqueue(dbs_aux_wq);
 #endif /* ENABLE_WORK_RESTARTLOOP */
 
-#if (defined(USE_LCD_NOTIFIER) && !defined(CONFIG_POWERSUSPEND))
-	lcd_unregister_client(&zzmoove_lcd_notif);
-#endif /* (defined(USE_LCD_NOTIFIER)... */
+
 }
 
 MODULE_AUTHOR("Zane Zaminsky <cyxman@yahoo.com>");
