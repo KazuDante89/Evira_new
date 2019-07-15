@@ -7,9 +7,9 @@
  *           (C) 2012 Miguel Boton <mboton@gmail.com>
  *
  * Maple uses a first come first serve style algorithm with seperated read/write
- * handling to allow for read biases. By prioritizing reads, simple tasks should
- * improve in performance. Maple also uses hooks for the state notifier driver
- * to increase expirations when power is suspended to decrease workload.
+ * handling to allow for read biases. By prioritizing reads, simple tasks should improve
+ * in performance. Maple also uses hooks for the powersuspend driver to increase
+ * expirations when power is suspended to decrease workload.
  */
 #include <linux/blkdev.h>
 #include <linux/elevator.h>
@@ -49,7 +49,7 @@ struct maple_data {
 
 	/* Display state */
 	struct notifier_block fb_notifier;
-	int display_on;
+	bool display_on;
 };
 
 static inline struct maple_data *
@@ -83,20 +83,20 @@ maple_add_request(struct request_queue *q, struct request *rq)
 	const int sync = rq_is_sync(rq);
 	const int dir = rq_data_dir(rq);
 
-	/* increase expiration when device is asleep */
-	unsigned int fifo_expire_suspended = mdata->fifo_expire[sync][dir] * sleep_latency_multiple;
-
 	/*
 	 * Add request to the proper fifo list and set its
 	 * expire time.
 	 */
-	if (mdata->display_on && mdata->fifo_expire[sync][dir]) {
-		rq->fifo_time = jiffies + mdata->fifo_expire[sync][dir];
-		list_add_tail(&rq->queuelist, &mdata->fifo_list[sync][dir]);
-	} else if (!mdata->display_on && fifo_expire_suspended) {
-		rq->fifo_time = jiffies + fifo_expire_suspended;
-		list_add_tail(&rq->queuelist, &mdata->fifo_list[sync][dir]);
-	}
+
+   	/* inrease expiration when device is asleep */
+   	unsigned int fifo_expire_suspended = mdata->fifo_expire[sync][dir] * sleep_latency_multiple;
+   	if (mdata->display_on && mdata->fifo_expire[sync][dir]) {
+        rq->fifo_time = jiffies + mdata->fifo_expire[sync][dir];
+   		list_add_tail(&rq->queuelist, &mdata->fifo_list[sync][dir]);
+   	} else if (!mdata->display_on && fifo_expire_suspended) {
+        rq->fifo_time = jiffies + fifo_expire_suspended;
+   		list_add_tail(&rq->queuelist, &mdata->fifo_list[sync][dir]);
+   	}
 }
 
 static struct request *
@@ -112,7 +112,7 @@ maple_expired_request(struct maple_data *mdata, int sync, int data_dir)
 	rq = rq_entry_fifo(list->next);
 
 	/* Request has expired */
-	if (time_after_eq(jiffies, rq->fifo_time))
+    if (time_after_eq(jiffies, rq->fifo_time))
 		return rq;
 
 	return NULL;
@@ -134,23 +134,24 @@ maple_choose_expired_request(struct maple_data *mdata)
 	 * Asynchronous requests have priority over synchronous.
 	 * Read requests have priority over write.
 	 */
-	if (rq_async_read && rq_sync_read) {
-		if (time_after(rq_sync_read->fifo_time, rq_async_read->fifo_time))
-			return rq_async_read;
-	} else if (rq_async_read) {
-		return rq_async_read;
-	} else if (rq_sync_read) {
-		return rq_sync_read;
-	}
 
-	if (rq_async_write && rq_sync_write) {
-		if (time_after(rq_sync_write->fifo_time, rq_async_write->fifo_time))
-			return rq_async_write;
-	} else if (rq_async_write) {
-		return rq_async_write;
-	} else if (rq_sync_write) {
-		return rq_sync_write;
-	}
+   if (rq_async_read && rq_sync_read) {
+     if (time_after(rq_sync_read->fifo_time, rq_async_read->fifo_time))
+             return rq_async_read;
+   } else if (rq_async_read) {
+           return rq_async_read;
+   } else if (rq_sync_read) {
+           return rq_sync_read;
+   }
+
+   if (rq_async_write && rq_sync_write) {
+if (time_after(rq_sync_write->fifo_time, rq_async_write->fifo_time))
+             return rq_async_write;
+   } else if (rq_async_write) {
+           return rq_async_write;
+   } else if (rq_sync_write) {
+           return rq_sync_write;
+   }
 
 	return NULL;
 }
@@ -164,6 +165,7 @@ maple_choose_request(struct maple_data *mdata, int data_dir)
 	/* Increase (non-expired-)batch-counter */
 	mdata->batched++;
 
+
 	/*
 	 * Retrieve request from available fifo list.
 	 * Asynchronous requests have priority over synchronous.
@@ -175,7 +177,7 @@ maple_choose_request(struct maple_data *mdata, int data_dir)
 		return rq_entry_fifo(sync[data_dir].next);
 
 	if (!list_empty(&async[!data_dir]))
-		return rq_entry_fifo(async[!data_dir].next);
+			return rq_entry_fifo(async[!data_dir].next);
 	if (!list_empty(&sync[!data_dir]))
 		return rq_entry_fifo(sync[!data_dir].next);
 
@@ -218,8 +220,7 @@ maple_dispatch_requests(struct request_queue *q, int force)
 	/* Retrieve request */
 	if (!rq) {
 		/* Treat writes fairly while suspended, otherwise allow them to be starved */
-		if (mdata->display_on &&
-		    mdata->starved >= mdata->writes_starved)
+		if (mdata->display_on && mdata->starved >= mdata->writes_starved)
 			data_dir = WRITE;
 		else if (!mdata->display_on && mdata->starved >= 1)
 			data_dir = WRITE;
@@ -267,22 +268,22 @@ static int fb_notifier_callback(struct notifier_block *self,
 				unsigned long event, void *data)
 {
 	struct maple_data *mdata = container_of(self,
-						struct maple_data, fb_notifier);
+									struct maple_data, fb_notifier);
 	struct fb_event *evdata = data;
 	int *blank;
 
 	if (evdata && evdata->data && event == FB_EVENT_BLANK) {
 		blank = evdata->data;
 		switch (*blank) {
-		case FB_BLANK_UNBLANK:
-			mdata->display_on = 1;
-			break;
-		case FB_BLANK_POWERDOWN:
-		case FB_BLANK_HSYNC_SUSPEND:
-		case FB_BLANK_VSYNC_SUSPEND:
-		case FB_BLANK_NORMAL:
-			mdata->display_on = 0;
-			break;
+			case FB_BLANK_UNBLANK:
+				mdata->display_on = true;
+				break;
+			case FB_BLANK_POWERDOWN:
+			case FB_BLANK_HSYNC_SUSPEND:
+			case FB_BLANK_VSYNC_SUSPEND:
+			case FB_BLANK_NORMAL:
+				mdata->display_on = false;
+				break;
 		}
 	}
 
@@ -349,18 +350,15 @@ maple_exit_queue(struct elevator_queue *e)
 static ssize_t
 maple_var_show(int var, char *page)
 {
-	return snprintf(page, PAGE_SIZE, "%d\n", var);
+	return sprintf(page, "%d\n", var);
 }
 
 static ssize_t
 maple_var_store(int *var, const char *page, size_t count)
 {
-	int ret;
+	char *p = (char *) page;
 
-	ret = kstrtoint(page, 10, var);
-	if (ret)
-		return ret;
-
+	*var = simple_strtol(p, &p, 10);
 	return count;
 }
 
@@ -408,7 +406,7 @@ STORE_FUNCTION(maple_sleep_latency_multiple_store, &mdata->sleep_latency_multipl
 #undef STORE_FUNCTION
 
 #define DD_ATTR(name) \
-	__ATTR(name, 0644, maple_##name##_show, \
+	__ATTR(name, S_IRUGO|S_IWUSR, maple_##name##_show, \
 				      maple_##name##_store)
 
 static struct elv_fs_entry maple_attrs[] = {
@@ -418,7 +416,7 @@ static struct elv_fs_entry maple_attrs[] = {
 	DD_ATTR(async_write_expire),
 	DD_ATTR(fifo_batch),
 	DD_ATTR(writes_starved),
-	DD_ATTR(sleep_latency_multiple),
+  DD_ATTR(sleep_latency_multiple),
 	__ATTR_NULL
 };
 
